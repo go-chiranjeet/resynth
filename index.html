@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ResearchSynthesizer AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        background-color: #f8fafc; /* Slate 50 */
+        color: #0f172a; /* Slate 900 */
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      }
+      /* Custom scrollbar for markdown tables */
+      .prose table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+      /* Markdown Styles - Light Mode */
+      .markdown-body {
+        color: #334155; /* Slate 700 */
+        line-height: 1.7;
+        font-size: 0.95rem;
+      }
+      .markdown-body h1, .markdown-body h2, .markdown-body h3 {
+        color: #0f172a; /* Slate 900 */
+        font-weight: 700;
+        margin-top: 1.5em;
+        margin-bottom: 0.75em;
+        letter-spacing: -0.025em;
+      }
+      .markdown-body h1 { font-size: 1.75em; }
+      .markdown-body h2 { font-size: 1.4em; }
+      .markdown-body h3 { font-size: 1.2em; }
+      
+      .markdown-body table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        margin: 1.5em 0;
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      }
+      .markdown-body th {
+        background-color: #f8fafc; /* Slate 50 */
+        padding: 16px;
+        text-align: left;
+        border-bottom: 2px solid #e2e8f0;
+        color: #475569;
+        font-size: 0.8rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+      }
+      .markdown-body td {
+        padding: 16px;
+        border-bottom: 1px solid #e2e8f0;
+        color: #334155;
+        vertical-align: top;
+      }
+      .markdown-body tr:last-child td {
+        border-bottom: none;
+      }
+      .markdown-body tr:hover td {
+        background-color: #f8fafc;
+      }
+      
+      .markdown-body blockquote {
+        border-left: 4px solid #f97316; /* Orange 500 */
+        padding-left: 1rem;
+        font-style: italic;
+        color: #475569;
+        background: #fff7ed; /* Orange 50 */
+        padding: 1.25rem;
+        border-radius: 0 12px 12px 0;
+        margin: 1.5em 0;
+      }
+      .markdown-body ul {
+        list-style-type: disc;
+        padding-left: 1.5em;
+        margin: 1em 0;
+      }
+      .markdown-body li {
+        margin-bottom: 0.5em;
+      }
+      .markdown-body strong {
+        color: #0f172a;
+        font-weight: 600;
+      }
+      
+      /* Custom File Input Reset */
+      input[type="file"]::file-selector-button {
+        display: none;
+      }
+      
+      /* Animations */
+      @keyframes fade-in {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .animate-fade-in {
+        animation: fade-in 0.5s ease-out forwards;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
