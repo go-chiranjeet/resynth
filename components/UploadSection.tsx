@@ -1,7 +1,12 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Upload, FileAudio, FileVideo, AlertCircle, Cloud } from 'lucide-react';
+import { Upload, FileAudio, FileVideo, AlertCircle, Cloud, X, Loader2 } from 'lucide-react';
 import { MAX_FILE_SIZE_MB } from '../constants';
-import useDrivePicker from 'react-google-drive-picker';
+
+declare global {
+  interface Window {
+    google?: any;
+  }
+}
 
 interface UploadSectionProps {
   onFileSelected: (file: File) => void;
@@ -12,14 +17,11 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDriveModalOpen, setIsDriveModalOpen] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<any[]>([]);
+  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
+  const [driveToken, setDriveToken] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const [openPicker, authResponse] = useDrivePicker();
-  const authResponseRef = useRef(authResponse);
-
-  useEffect(() => {
-    authResponseRef.current = authResponse;
-  }, [authResponse]);
 
   const handleFiles = (files: FileList | null | File[]) => {
     if (!files || files.length === 0) return;
@@ -71,68 +73,81 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
     inputRef.current?.click();
   };
 
+  const fetchDriveFiles = async (token: string) => {
+    setIsLoadingDrive(true);
+    setIsDriveModalOpen(true);
+    setError(null);
+    try {
+      const query = "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/')";
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size)&pageSize=50`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error("Failed to fetch files from Google Drive");
+      const data = await response.json();
+      setDriveFiles(data.files || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to fetch files from Google Drive");
+      setIsDriveModalOpen(false);
+    } finally {
+      setIsLoadingDrive(false);
+    }
+  };
+
+  const handleDriveFileSelect = async (file: any) => {
+    if (!driveToken) return;
+    setIsDriveModalOpen(false);
+    setIsDownloading(true);
+    setError(null);
+    try {
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`, {
+        headers: { Authorization: `Bearer ${driveToken}` }
+      });
+      if (!response.ok) throw new Error("Failed to download file from Google Drive");
+      const blob = await response.blob();
+      const downloadedFile = new File([blob], file.name, { type: file.mimeType });
+      handleFiles([downloadedFile]);
+    } catch (err: any) {
+      setError(err.message || "Failed to download file from Google Drive");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const handleDriveUpload = () => {
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY?.trim();
 
-    if (!clientId || !apiKey) {
-      setError("Google Drive integration is not configured. Please add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your environment variables.");
-      return;
-    }
-
-    if (!apiKey.startsWith('AIza')) {
-      setError("The VITE_GOOGLE_API_KEY appears to be invalid. Google API keys always start with 'AIza'. Please check your Environment Variables and ensure you didn't accidentally paste the Client ID or Client Secret.");
+    if (!clientId) {
+      setError("Google Drive integration is not configured. Please add VITE_GOOGLE_CLIENT_ID to your environment variables.");
       return;
     }
 
     if (!clientId.endsWith('.apps.googleusercontent.com')) {
-      setError("The VITE_GOOGLE_CLIENT_ID appears to be invalid. It should end with '.apps.googleusercontent.com'. Please check your Environment Variables.");
+      setError("The VITE_GOOGLE_CLIENT_ID appears to be invalid. It should end with '.apps.googleusercontent.com'.");
       return;
     }
 
-    openPicker({
-      clientId: clientId,
-      developerKey: apiKey,
-      viewId: "DOCS",
-      viewMimeTypes: "video/mp4,video/webm,audio/mp3,audio/mpeg,audio/wav",
-      supportDrives: true,
-      multiselect: false,
-      customScopes: ['https://www.googleapis.com/auth/drive.readonly'],
-      setOrigin: window.location.origin,
-      callbackFunction: async (data, err) => {
-        if (data.action === 'picked') {
-          const file = data.docs[0];
-          const fileId = file.id;
-          const fileName = file.name;
-          const mimeType = file.mimeType;
-          
-          try {
-            setIsDownloading(true);
-            setError(null);
-            const token = authResponseRef.current?.access_token || data.token;
-            if (!token) throw new Error("No access token available for downloading from Google Drive");
+    if (!window.google) {
+      setError("Google Identity Services script not loaded yet. Please try again in a moment or refresh the page.");
+      return;
+    }
 
-            const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-              headers: {
-                Authorization: `Bearer ${token}`
-              }
-            });
-
-            if (!response.ok) {
-               throw new Error(`Failed to download file from Google Drive: ${response.statusText}`);
-            }
-
-            const blob = await response.blob();
-            const downloadedFile = new File([blob], fileName, { type: mimeType });
-            handleFiles([downloadedFile]);
-          } catch (err: any) {
-            setError(err.message || "Failed to download file from Google Drive");
-          } finally {
-            setIsDownloading(false);
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.readonly',
+        callback: (response: any) => {
+          if (response.error !== undefined) {
+            setError("Google Drive authentication failed: " + response.error);
+            return;
           }
-        }
-      },
-    });
+          setDriveToken(response.access_token);
+          fetchDriveFiles(response.access_token);
+        },
+      });
+      client.requestAccessToken();
+    } catch (err: any) {
+      setError("Failed to initialize Google Auth: " + err.message);
+    }
   };
 
   return (
@@ -218,6 +233,58 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
         <div className="mt-4 flex items-center gap-3 text-red-600 bg-red-50 p-4 rounded-xl border border-red-100 shadow-sm animate-fade-in">
           <AlertCircle size={20} />
           <span className="text-sm font-semibold">{error}</span>
+        </div>
+      )}
+
+      {isDriveModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Cloud className="text-blue-500" size={20} />
+                Select from Google Drive
+              </h3>
+              <button onClick={() => setIsDriveModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 bg-slate-50/50">
+              {isLoadingDrive ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+                  <Loader2 size={32} className="animate-spin mb-4 text-blue-500" />
+                  <p>Loading your files...</p>
+                </div>
+              ) : driveFiles.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                  <p>No video or audio files found in your Google Drive.</p>
+                </div>
+              ) : (
+                <div className="grid gap-2">
+                  {driveFiles.map(file => (
+                    <button
+                      key={file.id}
+                      onClick={() => handleDriveFileSelect(file)}
+                      className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-left group"
+                    >
+                      <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-blue-50 transition-colors">
+                        {file.mimeType.startsWith('video/') ? (
+                          <FileVideo size={20} className="text-purple-500" />
+                        ) : (
+                          <FileAudio size={20} className="text-pink-500" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-700 truncate">{file.name}</p>
+                        {file.size && (
+                          <p className="text-xs text-slate-400">{(parseInt(file.size) / (1024 * 1024)).toFixed(2)} MB</p>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
