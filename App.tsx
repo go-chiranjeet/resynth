@@ -80,14 +80,14 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 leading-none">
-                research<span className="text-orange-500">synthesizer</span>
+                res<span className="text-orange-500">synth</span>
               </h1>
             </div>
           </div>
           
           <div className="hidden md:flex items-center gap-2 text-xs font-semibold text-slate-500 bg-slate-50 px-4 py-2 rounded-full border border-slate-200 shadow-sm">
             <Sparkles size={14} className="text-orange-500" />
-            <span>Powered by Gemini 3.0 Pro</span>
+            <span>Powered by Gemini 3.1 Pro</span>
           </div>
         </div>
       </header>
@@ -115,7 +115,7 @@ const App: React.FC = () => {
               <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 mb-6 leading-tight tracking-tight">
                 turn interviews into insights <br/> 
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-pink-500">
-                  in seconds
+                  in minutes
                 </span>
               </h2>
               <p className="text-slate-500 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
@@ -175,7 +175,7 @@ const App: React.FC = () => {
       </main>
 
       <footer className="py-8 text-center text-slate-400 text-sm border-t border-slate-100 bg-white">
-        <p className="font-medium">&copy; {new Date().getFullYear()} ResearchSynthesizer AI. <span className="text-slate-300 mx-2">|</span> Designed for Senior UX Researchers.</p>
+        <p className="font-medium">&copy; {new Date().getFullYear()} ResSynth AI. <span className="text-slate-300 mx-2">|</span> Designed for Senior UX Researchers.</p>
       </footer>
     </div>
   );

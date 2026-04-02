@@ -24,6 +24,6 @@ Output strictly in Markdown.
 | 00:00 | User | "..." | ... | Negative | Visibility of System Status |
 `;
 
-export const MODEL_NAME = 'gemini-3-pro-preview';
+export const MODEL_NAME = 'gemini-3.1-pro-preview';
 
 export const MAX_FILE_SIZE_MB = 1024; // Client-side limitation warning

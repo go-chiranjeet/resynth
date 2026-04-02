@@ -72,11 +72,21 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
   };
 
   const handleDriveUpload = () => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY?.trim();
 
     if (!clientId || !apiKey) {
       setError("Google Drive integration is not configured. Please add VITE_GOOGLE_CLIENT_ID and VITE_GOOGLE_API_KEY to your environment variables.");
+      return;
+    }
+
+    if (!apiKey.startsWith('AIza')) {
+      setError("The VITE_GOOGLE_API_KEY appears to be invalid. Google API keys always start with 'AIza'. Please check your Environment Variables and ensure you didn't accidentally paste the Client ID or Client Secret.");
+      return;
+    }
+
+    if (!clientId.endsWith('.apps.googleusercontent.com')) {
+      setError("The VITE_GOOGLE_CLIENT_ID appears to be invalid. It should end with '.apps.googleusercontent.com'. Please check your Environment Variables.");
       return;
     }
 
@@ -85,10 +95,10 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
       developerKey: apiKey,
       viewId: "DOCS",
       viewMimeTypes: "video/mp4,video/webm,audio/mp3,audio/mpeg,audio/wav",
-      showUploadView: true,
-      showUploadFolders: true,
       supportDrives: true,
       multiselect: false,
+      customScopes: ['https://www.googleapis.com/auth/drive.readonly'],
+      setOrigin: window.location.origin,
       callbackFunction: async (data, err) => {
         if (data.action === 'picked') {
           const file = data.docs[0];
@@ -194,6 +204,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
 
       <div className="mt-4 flex justify-center">
         <button
+          type="button"
           onClick={handleDriveUpload}
           disabled={isLoading || isDownloading}
           className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 hover:shadow-md transition-all text-slate-700 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
