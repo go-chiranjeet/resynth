@@ -73,13 +73,16 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
     inputRef.current?.click();
   };
 
-  const fetchDriveFiles = async (token: string) => {
+  const fetchDriveFiles = async (token: string, searchQuery: string = "") => {
     setIsLoadingDrive(true);
     setIsDriveModalOpen(true);
     setError(null);
     try {
-      const query = "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/')";
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size)&pageSize=50`, {
+      let query = "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/')";
+      if (searchQuery) {
+        query += ` and name contains '${searchQuery.replace(/'/g, "\\'")}'`;
+      }
+      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!response.ok) throw new Error("Failed to fetch files from Google Drive");
@@ -194,7 +197,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
               Drag & drop or click to browse
             </p>
             <p className="text-slate-400 text-xs max-w-xs mx-auto leading-relaxed">
-              Max file size: 1GB. Large files may take several minutes to upload and process. Please ensure a stable connection and keep this tab open.
+              Max file size: 2GB. Large files may take several minutes to upload and process. Please ensure a stable connection and keep this tab open.
             </p>
           </div>
 
@@ -244,11 +247,21 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
                 <Cloud className="text-blue-500" size={20} />
                 Select from Google Drive
               </h3>
-              <button onClick={() => setIsDriveModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+              <button type="button" onClick={() => setIsDriveModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
                 <X size={20} />
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1 bg-slate-50/50">
+              <div className="mb-4">
+                <input 
+                  type="text" 
+                  placeholder="Search files across all drives..." 
+                  className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    if (driveToken) fetchDriveFiles(driveToken, e.target.value);
+                  }}
+                />
+              </div>
               {isLoadingDrive ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-500">
                   <Loader2 size={32} className="animate-spin mb-4 text-blue-500" />
@@ -263,6 +276,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
                   {driveFiles.map(file => (
                     <button
                       key={file.id}
+                      type="button"
                       onClick={() => handleDriveFileSelect(file)}
                       className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-left group"
                     >

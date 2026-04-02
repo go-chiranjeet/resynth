@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UploadSection } from './components/UploadSection';
 import { AnalysisView } from './components/AnalysisView';
 import { analyzeUserSession } from './services/gemini';
-import { AnalysisState, AnalysisStatus, FileData } from './types';
-import { BrainCircuit, Sparkles, Smile } from 'lucide-react';
+import { AnalysisState, AnalysisStatus, FileData, GeminiFileInfo } from './types';
+import { BrainCircuit, Sparkles, Smile, AlertTriangle, X, FileText } from 'lucide-react';
 
 const App: React.FC = () => {
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -13,6 +13,104 @@ const App: React.FC = () => {
     error: null,
   });
 
+  const [estimatedTimeMs, setEstimatedTimeMs] = useState<number>(0);
+  const [savedResult, setSavedResult] = useState<string | null>(null);
+  const [crashReport, setCrashReport] = useState<string | null>(null);
+  const [savedGeminiFile, setSavedGeminiFile] = useState<GeminiFileInfo | null>(null);
+
+  useEffect(() => {
+    const status = localStorage.getItem('resSynth_status');
+    const savedFileStr = localStorage.getItem('resSynth_geminiFile');
+    
+    if (savedFileStr) {
+      try {
+        setSavedGeminiFile(JSON.parse(savedFileStr));
+      } catch (e) {}
+    }
+
+    if (status === 'COMPLETED') {
+      const result = localStorage.getItem('resSynth_result');
+      if (result) {
+        setSavedResult(result);
+      }
+    } else if (status === 'PROCESSING') {
+      const lastStep = localStorage.getItem('resSynth_step');
+      setCrashReport(`The previous session was interrupted during: "${lastStep}". This is often caused by the browser running out of memory or the device going to sleep.`);
+      localStorage.removeItem('resSynth_status');
+    }
+  }, []);
+
+  const wakeLockRef = useRef<any>(null);
+
+  useEffect(() => {
+    const requestWakeLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        }
+      } catch (err) {
+        console.error('Wake Lock error:', err);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (wakeLockRef.current !== null && document.visibilityState === 'visible' && analysisState.status === AnalysisStatus.PROCESSING) {
+        requestWakeLock();
+      }
+    };
+
+    if (analysisState.status === AnalysisStatus.PROCESSING) {
+      requestWakeLock();
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    } else {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {}).finally(() => {
+          wakeLockRef.current = null;
+        });
+      }
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {}).finally(() => {
+          wakeLockRef.current = null;
+        });
+      }
+    };
+  }, [analysisState.status]);
+
+  const handleRestore = () => {
+    if (savedResult) {
+      setAnalysisState({
+        status: AnalysisStatus.COMPLETED,
+        result: savedResult,
+        error: null,
+      });
+      setFileData(null);
+      setSavedResult(null);
+    }
+  };
+
+  const handleClearMemory = () => {
+    localStorage.removeItem('resSynth_status');
+    localStorage.removeItem('resSynth_result');
+    localStorage.removeItem('resSynth_step');
+    localStorage.removeItem('resSynth_geminiFile');
+    setSavedResult(null);
+    setSavedGeminiFile(null);
+    setCrashReport(null);
+  };
+
+  const handleResumeFromCloud = () => {
+    if (savedGeminiFile) {
+      setCrashReport(null);
+      setFileData(null);
+      setEstimatedTimeMs(60000); // Estimate 60s for generation
+      startAnalysis(savedGeminiFile);
+    }
+  };
+
   const handleFileSelected = (file: File) => {
     const url = URL.createObjectURL(file);
     setFileData({
@@ -21,25 +119,50 @@ const App: React.FC = () => {
       type: file.type.startsWith('video') ? 'video' : 'audio',
     });
     
+    // Calculate estimated time: roughly 1.5 seconds per MB, minimum 45 seconds to account for processing and generation
+    const fileSizeMB = file.size / (1024 * 1024);
+    const estimatedSeconds = Math.max(45, fileSizeMB * 1.5);
+    setEstimatedTimeMs(estimatedSeconds * 1000);
+
     // Auto-start analysis
     startAnalysis(file);
   };
 
-  const startAnalysis = async (file: File) => {
+  const startAnalysis = async (input: File | GeminiFileInfo) => {
+    localStorage.setItem('resSynth_status', 'PROCESSING');
+    localStorage.setItem('resSynth_step', 'Starting analysis...');
+    localStorage.removeItem('resSynth_result');
+
     setAnalysisState({
       status: AnalysisStatus.PROCESSING,
       result: null,
       error: null,
+      step: "Starting analysis...",
     });
 
     try {
-      const result = await analyzeUserSession(file);
+      const result = await analyzeUserSession(
+        input, 
+        (step) => {
+          localStorage.setItem('resSynth_step', step);
+          setAnalysisState(prev => ({ ...prev, step }));
+        },
+        (info) => {
+          localStorage.setItem('resSynth_geminiFile', JSON.stringify(info));
+          setSavedGeminiFile(info);
+        }
+      );
+      
+      localStorage.setItem('resSynth_status', 'COMPLETED');
+      localStorage.setItem('resSynth_result', result);
+
       setAnalysisState({
         status: AnalysisStatus.COMPLETED,
         result,
         error: null,
       });
     } catch (error: any) {
+      localStorage.setItem('resSynth_status', 'ERROR');
       setAnalysisState({
         status: AnalysisStatus.ERROR,
         result: null,
@@ -58,6 +181,7 @@ const App: React.FC = () => {
       result: null,
       error: null,
     });
+    handleClearMemory();
   };
 
   // Cleanup URLs on unmount
@@ -94,12 +218,51 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col">
-        {!fileData ? (
+        {!fileData && analysisState.status === AnalysisStatus.IDLE ? (
           <div className="flex-1 flex flex-col items-center justify-center p-6 animate-fade-in relative overflow-hidden">
             
             {/* Background decorations matching Droplist style */}
             <div className="absolute top-20 left-20 w-64 h-64 bg-purple-200/40 rounded-full blur-3xl -z-10"></div>
             <div className="absolute bottom-20 right-20 w-80 h-80 bg-orange-100/60 rounded-full blur-3xl -z-10"></div>
+
+            {crashReport && (
+              <div className="max-w-3xl mx-auto mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3 text-red-700 text-sm z-10 relative">
+                <AlertTriangle className="shrink-0 mt-0.5" size={18} />
+                <div className="text-left flex-1">
+                  <p className="font-bold">Previous Session Interrupted</p>
+                  <p>{crashReport}</p>
+                  {savedGeminiFile && (
+                    <button
+                      type="button"
+                      onClick={handleResumeFromCloud}
+                      className="mt-3 px-4 py-2 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors shadow-sm"
+                    >
+                      Resume Analysis from Cloud
+                    </button>
+                  )}
+                </div>
+                <button type="button" onClick={() => setCrashReport(null)} className="ml-auto p-1 hover:bg-red-100 rounded-lg transition-colors">
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+
+            {savedResult && (
+              <div className="max-w-3xl mx-auto mb-6 p-4 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-between text-indigo-700 text-sm z-10 relative">
+                <div className="flex items-center gap-3 text-left">
+                  <FileText className="shrink-0" size={18} />
+                  <p className="font-medium">You have a saved analysis report from a previous session.</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button type="button" onClick={handleRestore} className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 transition-colors shadow-sm">
+                    View Report
+                  </button>
+                  <button type="button" onClick={handleClearMemory} className="px-3 py-1.5 text-indigo-600 hover:bg-indigo-100 rounded-lg font-medium transition-colors">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="text-center max-w-3xl mx-auto mb-10">
               <div className="inline-block mb-6 relative">
@@ -169,7 +332,11 @@ const App: React.FC = () => {
             fileData={fileData} 
             analysisState={analysisState} 
             onReset={handleReset}
-            onRetry={() => startAnalysis(fileData.file)}
+            onRetry={() => {
+              if (fileData) startAnalysis(fileData.file);
+              else if (savedGeminiFile) startAnalysis(savedGeminiFile);
+            }}
+            estimatedTimeMs={estimatedTimeMs}
           />
         )}
       </main>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { FileData, AnalysisState, AnalysisStatus } from '../types';
 import { Spinner } from './Spinner';
@@ -6,20 +6,60 @@ import { Check, Copy, RefreshCw, AlertTriangle, FileText, ChevronRight, Share, D
 import { ExportModal } from './ExportModal';
 
 interface AnalysisViewProps {
-  fileData: FileData;
+  fileData: FileData | null;
   analysisState: AnalysisState;
   onReset: () => void;
   onRetry: () => void;
+  estimatedTimeMs?: number;
 }
 
 export const AnalysisView: React.FC<AnalysisViewProps> = ({ 
   fileData, 
   analysisState, 
   onReset,
-  onRetry
+  onRetry,
+  estimatedTimeMs = 60000
 }) => {
   const [copied, setCopied] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [elapsedMs, setElapsedMs] = useState(0);
+
+  const isProcessing = analysisState.status === AnalysisStatus.PROCESSING;
+  const isCompleted = analysisState.status === AnalysisStatus.COMPLETED;
+  const isError = analysisState.status === AnalysisStatus.ERROR;
+
+  useEffect(() => {
+    if (isProcessing) {
+      const startTime = Date.now();
+      const timer = setInterval(() => {
+        setElapsedMs(Date.now() - startTime);
+      }, 1000);
+      return () => clearInterval(timer);
+    } else if (isCompleted) {
+      setProgress(100);
+    } else {
+      setElapsedMs(0);
+      setProgress(0);
+    }
+  }, [isProcessing, isCompleted]);
+
+  useEffect(() => {
+    if (isProcessing && estimatedTimeMs > 0) {
+      // Calculate progress based on elapsed time vs estimated time, capped at 95%
+      const rawProgress = (elapsedMs / estimatedTimeMs) * 100;
+      // Slow down the progress as it gets closer to 95% to avoid jumping and sticking
+      const boundedProgress = Math.min(rawProgress, 95);
+      setProgress(boundedProgress);
+    }
+  }, [elapsedMs, estimatedTimeMs, isProcessing]);
+
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins}m ${secs.toString().padStart(2, '0')}s`;
+  };
 
   const handleCopy = () => {
     if (analysisState.result) {
@@ -42,10 +82,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         URL.revokeObjectURL(url);
     }
   }
-
-  const isProcessing = analysisState.status === AnalysisStatus.PROCESSING;
-  const isCompleted = analysisState.status === AnalysisStatus.COMPLETED;
-  const isError = analysisState.status === AnalysisStatus.ERROR;
 
   return (
     <div className="w-full max-w-7xl mx-auto p-4 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 h-full">
@@ -96,12 +132,19 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             <div className="relative z-10">
               <h3 className="text-xl font-bold text-slate-900">Synthesizing...</h3>
               <p className="text-slate-500 mt-2 font-medium">
-                Identifying speakers, friction points, and recurring themes.
+                {analysisState.step || "Identifying speakers, friction points, and recurring themes."}
               </p>
             </div>
             
             <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden relative z-10">
-               <div className="h-full bg-orange-500 w-1/3 animate-[shimmer_1.5s_infinite_linear] bg-[length:200%_100%] bg-gradient-to-r from-orange-400 via-orange-300 to-orange-400"></div>
+               <div 
+                 className="h-full bg-orange-500 transition-all duration-1000 ease-linear bg-gradient-to-r from-orange-400 via-orange-300 to-orange-400"
+                 style={{ width: `${progress}%` }}
+               ></div>
+            </div>
+            <div className="flex justify-between w-full text-xs text-slate-400 font-medium relative z-10 px-1">
+              <span>Elapsed: {formatTime(elapsedMs)}</span>
+              <span>Est. Total: ~{formatTime(estimatedTimeMs)}</span>
             </div>
           </div>
         )}
@@ -119,6 +162,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               </p>
             </div>
             <button 
+              type="button"
               onClick={onRetry}
               className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-all shadow-md shadow-red-200"
             >
@@ -172,6 +216,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           {isCompleted && (
             <div className="flex items-center gap-3">
                 <button
+                type="button"
                 onClick={() => setIsExportModalOpen(true)}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-orange-500 text-white hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20 transform hover:-translate-y-0.5"
                 >
@@ -179,6 +224,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 </button>
                 <div className="flex bg-white rounded-xl border border-slate-200 p-1 shadow-sm">
                     <button
+                        type="button"
                         onClick={handleDownload}
                         className="p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors"
                         title="Download Markdown"
@@ -187,6 +233,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                     </button>
                     <div className="w-px bg-slate-200 mx-1 my-1"></div>
                     <button
+                        type="button"
                         onClick={handleCopy}
                         className={`
                         p-2 rounded-lg transition-colors flex items-center gap-1
