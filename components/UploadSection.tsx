@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Upload, FileAudio, FileVideo, AlertCircle, Cloud, X, Loader2 } from 'lucide-react';
-import { MAX_FILE_SIZE_MB } from '../constants';
+import { Upload, FileAudio, FileVideo, AlertCircle, Cloud, X, Loader2, Folder, ArrowLeft, HardDrive } from 'lucide-react';
+import { MAX_FILE_SIZE_MB, BULK_MAX_TOTAL_SIZE_MB, BULK_MAX_FILES_500MB, BULK_MAX_FILES_300MB } from '../constants';
 
 declare global {
   interface Window {
@@ -9,11 +9,11 @@ declare global {
 }
 
 interface UploadSectionProps {
-  onFileSelected: (file: File) => void;
+  onFilesSelected: (files: File[]) => void;
   isLoading: boolean;
 }
 
-export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, isLoading }) => {
+export const UploadSection: React.FC<UploadSectionProps> = ({ onFilesSelected, isLoading }) => {
   const [dragActive, setDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -21,26 +21,58 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isLoadingDrive, setIsLoadingDrive] = useState(false);
   const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [currentFolder, setCurrentFolder] = useState({ id: 'locations', name: 'Locations' });
+  const [folderHistory, setFolderHistory] = useState<{id: string, name: string}[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFiles = (files: FileList | null | File[]) => {
     if (!files || files.length === 0) return;
     
-    const file = files[0];
-    const fileSizeMB = file.size / (1024 * 1024);
-
-    if (fileSizeMB > MAX_FILE_SIZE_MB) {
-      setError(`File size exceeds ${MAX_FILE_SIZE_MB}MB limit for this demo.`);
-      return;
+    const fileArray = Array.from(files);
+    
+    // Check individual file types
+    for (const file of fileArray) {
+      if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+        setError("Please upload valid Video (MP4) or Audio (MP3) files.");
+        return;
+      }
     }
 
-    if (!file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
-      setError("Please upload a valid Video (MP4) or Audio (MP3) file.");
-      return;
+    // Check limits
+    if (fileArray.length === 1) {
+      const fileSizeMB = fileArray[0].size / (1024 * 1024);
+      if (fileSizeMB > MAX_FILE_SIZE_MB) {
+        setError(`File size exceeds ${MAX_FILE_SIZE_MB}MB limit for single file uploads.`);
+        return;
+      }
+    } else {
+      const totalSizeMB = fileArray.reduce((acc, f) => acc + f.size, 0) / (1024 * 1024);
+      if (totalSizeMB > BULK_MAX_TOTAL_SIZE_MB) {
+        setError(`Total file size exceeds ${BULK_MAX_TOTAL_SIZE_MB}MB limit for bulk uploads.`);
+        return;
+      }
+
+      const allBelow300 = fileArray.every(f => (f.size / (1024 * 1024)) < 300);
+      const allBelow500 = fileArray.every(f => (f.size / (1024 * 1024)) < 500);
+
+      if (allBelow300) {
+        if (fileArray.length > BULK_MAX_FILES_300MB) {
+          setError(`You can only upload up to ${BULK_MAX_FILES_300MB} files when all files are below 300MB.`);
+          return;
+        }
+      } else if (allBelow500) {
+        if (fileArray.length > BULK_MAX_FILES_500MB) {
+          setError(`You can only upload up to ${BULK_MAX_FILES_500MB} files when files are below 500MB.`);
+          return;
+        }
+      } else {
+        setError(`Individual files in bulk upload must be below 500MB.`);
+        return;
+      }
     }
 
     setError(null);
-    onFileSelected(file);
+    onFilesSelected(fileArray);
   };
 
   const handleDrag = (e: React.DragEvent) => {
@@ -73,21 +105,49 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
     inputRef.current?.click();
   };
 
-  const fetchDriveFiles = async (token: string, searchQuery: string = "") => {
+  const fetchDriveFiles = async (token: string, folderId: string = 'locations', searchQuery: string = "") => {
     setIsLoadingDrive(true);
     setIsDriveModalOpen(true);
     setError(null);
     try {
-      let query = "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/')";
-      if (searchQuery) {
-        query += ` and name contains '${searchQuery.replace(/'/g, "\\'")}'`;
+      if (!searchQuery && folderId === 'locations') {
+        const response = await fetch(`https://www.googleapis.com/drive/v3/drives?pageSize=100`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error("Failed to fetch shared drives");
+        const data = await response.json();
+        
+        const locations = [
+          { id: 'root', name: 'My Drive', mimeType: 'application/vnd.google-apps.folder', isDrive: true },
+          ...(data.drives || []).map((d: any) => ({
+            id: d.id,
+            name: d.name,
+            mimeType: 'application/vnd.google-apps.folder',
+            isDrive: true
+          }))
+        ];
+        setDriveFiles(locations);
+      } else {
+        let query = "trashed = false and (mimeType contains 'video/' or mimeType contains 'audio/' or mimeType = 'application/vnd.google-apps.folder')";
+        if (searchQuery) {
+          query += ` and name contains '${searchQuery.replace(/'/g, "\\'")}'`;
+        } else {
+          query += ` and '${folderId}' in parents`;
+        }
+        
+        let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size)&pageSize=1000&supportsAllDrives=true&includeItemsFromAllDrives=true&orderBy=folder,name`;
+        
+        if (searchQuery || folderId !== 'root') {
+          url += '&corpora=allDrives';
+        }
+
+        const response = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error("Failed to fetch files from Google Drive");
+        const data = await response.json();
+        setDriveFiles(data.files || []);
       }
-      const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&fields=files(id,name,mimeType,size)&pageSize=50&supportsAllDrives=true&includeItemsFromAllDrives=true`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!response.ok) throw new Error("Failed to fetch files from Google Drive");
-      const data = await response.json();
-      setDriveFiles(data.files || []);
     } catch (err: any) {
       setError(err.message || "Failed to fetch files from Google Drive");
       setIsDriveModalOpen(false);
@@ -97,6 +157,13 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
   };
 
   const handleDriveFileSelect = async (file: any) => {
+    if (file.mimeType === 'application/vnd.google-apps.folder' || file.isDrive) {
+      setFolderHistory(prev => [...prev, currentFolder]);
+      setCurrentFolder({ id: file.id, name: file.name });
+      if (driveToken) fetchDriveFiles(driveToken, file.id);
+      return;
+    }
+
     if (!driveToken) return;
     setIsDriveModalOpen(false);
     setIsDownloading(true);
@@ -106,13 +173,55 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
         headers: { Authorization: `Bearer ${driveToken}` }
       });
       if (!response.ok) throw new Error("Failed to download file from Google Drive");
-      const blob = await response.blob();
-      const downloadedFile = new File([blob], file.name, { type: file.mimeType });
+      if (!response.body) throw new Error("Response body is empty");
+
+      let downloadedFile: File;
+
+      // Try to use Origin Private File System (OPFS) to stream the file to disk
+      // This prevents Out-Of-Memory (OOM) crashes for large files (e.g., 2GB videos)
+      if (navigator.storage && navigator.storage.getDirectory) {
+        try {
+          const root = await navigator.storage.getDirectory();
+          // Create a unique filename to avoid conflicts
+          const uniqueName = `${Date.now()}_${file.name}`;
+          const fileHandle = await root.getFileHandle(uniqueName, { create: true });
+          const writable = await fileHandle.createWritable();
+          
+          // Stream the download directly to disk
+          await response.body.pipeTo(writable);
+          
+          // Get the File object backed by the disk
+          const opfsFile = await fileHandle.getFile();
+          
+          // We need to override the type since OPFS might not set it correctly
+          downloadedFile = new File([opfsFile], file.name, { type: file.mimeType });
+        } catch (opfsError) {
+          console.warn("OPFS streaming failed, falling back to RAM blob:", opfsError);
+          // Fallback to RAM if OPFS fails (e.g., in incognito mode or unsupported browsers)
+          const blob = await response.blob();
+          downloadedFile = new File([blob], file.name, { type: file.mimeType });
+        }
+      } else {
+        // Fallback for older browsers
+        const blob = await response.blob();
+        downloadedFile = new File([blob], file.name, { type: file.mimeType });
+      }
+
       handleFiles([downloadedFile]);
     } catch (err: any) {
       setError(err.message || "Failed to download file from Google Drive");
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleBackFolder = () => {
+    const newHistory = [...folderHistory];
+    const prevFolder = newHistory.pop();
+    if (prevFolder) {
+      setFolderHistory(newHistory);
+      setCurrentFolder(prevFolder);
+      if (driveToken) fetchDriveFiles(driveToken, prevFolder.id);
     }
   };
 
@@ -144,7 +253,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
             return;
           }
           setDriveToken(response.access_token);
-          fetchDriveFiles(response.access_token);
+          fetchDriveFiles(response.access_token, 'locations');
         },
       });
       client.requestAccessToken();
@@ -177,6 +286,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
           type="file"
           className="hidden"
           accept="video/*,audio/*"
+          multiple
           onChange={handleChange}
           disabled={isLoading || isDownloading}
         />
@@ -197,7 +307,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
               Drag & drop or click to browse
             </p>
             <p className="text-slate-400 text-xs max-w-xs mx-auto leading-relaxed">
-              Max file size: 2GB. Large files may take several minutes to upload and process. Please ensure a stable connection and keep this tab open.
+              Max file size: {MAX_FILE_SIZE_MB}MB. Please compress your files to keep within this limit. Large files may take several minutes to upload and process. Please ensure a stable connection and keep this tab open.
             </p>
           </div>
 
@@ -243,11 +353,22 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-100">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <Cloud className="text-blue-500" size={20} />
-                Select from Google Drive
-              </h3>
-              <button type="button" onClick={() => setIsDriveModalOpen(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+              <div className="flex items-center gap-2">
+                {folderHistory.length > 0 && (
+                  <button type="button" onClick={handleBackFolder} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors mr-1">
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Cloud className="text-blue-500" size={20} />
+                  {currentFolder.name}
+                </h3>
+              </div>
+              <button type="button" onClick={() => {
+                setIsDriveModalOpen(false);
+                setCurrentFolder({ id: 'locations', name: 'Locations' });
+                setFolderHistory([]);
+              }} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
                 <X size={20} />
               </button>
             </div>
@@ -258,7 +379,7 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
                   placeholder="Search files across all drives..." 
                   className="w-full px-4 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   onChange={(e) => {
-                    if (driveToken) fetchDriveFiles(driveToken, e.target.value);
+                    if (driveToken) fetchDriveFiles(driveToken, currentFolder.id, e.target.value);
                   }}
                 />
               </div>
@@ -281,7 +402,11 @@ export const UploadSection: React.FC<UploadSectionProps> = ({ onFileSelected, is
                       className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all text-left group"
                     >
                       <div className="p-2 bg-slate-50 rounded-lg group-hover:bg-blue-50 transition-colors">
-                        {file.mimeType.startsWith('video/') ? (
+                        {file.isDrive ? (
+                          <HardDrive size={20} className="text-blue-600" />
+                        ) : file.mimeType === 'application/vnd.google-apps.folder' ? (
+                          <Folder size={20} className="text-blue-500" />
+                        ) : file.mimeType.startsWith('video/') ? (
                           <FileVideo size={20} className="text-purple-500" />
                         ) : (
                           <FileAudio size={20} className="text-pink-500" />

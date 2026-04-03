@@ -3,9 +3,9 @@ import { SYSTEM_PROMPT, MODEL_NAME } from '../constants';
 import { GeminiFileInfo } from '../types';
 
 export const analyzeUserSession = async (
-  input: File | GeminiFileInfo,
+  inputs: (File | GeminiFileInfo)[],
   onStepChange?: (step: string) => void,
-  onFileUploaded?: (info: GeminiFileInfo) => void
+  onFilesUploaded?: (infos: GeminiFileInfo[]) => void
 ): Promise<string> => {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("API Key not found in environment variables.");
@@ -14,62 +14,70 @@ export const analyzeUserSession = async (
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
   try {
-    let fileUri = '';
-    let mimeType = '';
+    const uploadedInfos: GeminiFileInfo[] = [];
+    const parts: any[] = [];
 
-    if (input instanceof File) {
-      // 1. Upload the file using the SDK
-      onStepChange?.("Uploading file to Gemini...");
-      const uploadResult = await ai.files.upload({
-        file: input,
-        config: {
-          mimeType: input.type,
-          displayName: input.name
+    for (let i = 0; i < inputs.length; i++) {
+      const input = inputs[i];
+      let fileUri = '';
+      let mimeType = '';
+
+      if (input instanceof File) {
+        onStepChange?.(`Uploading file ${i + 1} of ${inputs.length} to Gemini...`);
+        const uploadResult = await ai.files.upload({
+          file: input,
+          config: {
+            mimeType: input.type,
+            displayName: input.name
+          }
+        });
+
+        onStepChange?.(`Processing file ${i + 1} of ${inputs.length} on Gemini servers...`);
+        let fileInfo = await ai.files.get({ name: uploadResult.name });
+        while (fileInfo.state === 'PROCESSING') {
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          fileInfo = await ai.files.get({ name: uploadResult.name });
+        }
+
+        if (fileInfo.state === 'FAILED') {
+          throw new Error(`File processing failed on Gemini servers for file ${i + 1}.`);
+        }
+
+        fileUri = fileInfo.uri;
+        mimeType = fileInfo.mimeType || input.type;
+        
+        uploadedInfos.push({
+          uri: fileUri,
+          name: fileInfo.name,
+          mimeType: mimeType
+        });
+      } else {
+        fileUri = input.uri;
+        mimeType = input.mimeType;
+        uploadedInfos.push(input);
+        onStepChange?.(`Recovering uploaded file ${i + 1} of ${inputs.length} from cloud...`);
+      }
+
+      parts.push({
+        fileData: {
+          fileUri: fileUri,
+          mimeType: mimeType
         }
       });
+    }
 
-      // 2. Wait for the file to be processed
-      onStepChange?.("Processing file on Gemini servers...");
-      let fileInfo = await ai.files.get({ name: uploadResult.name });
-      while (fileInfo.state === 'PROCESSING') {
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        fileInfo = await ai.files.get({ name: uploadResult.name });
-      }
-
-      if (fileInfo.state === 'FAILED') {
-        throw new Error('File processing failed on Gemini servers.');
-      }
-
-      fileUri = fileInfo.uri;
-      mimeType = fileInfo.mimeType || input.type;
-      
-      onFileUploaded?.({
-        uri: fileUri,
-        name: fileInfo.name,
-        mimeType: mimeType
-      });
-    } else {
-      fileUri = input.uri;
-      mimeType = input.mimeType;
-      onStepChange?.("Recovering uploaded file from cloud...");
+    if (uploadedInfos.length > 0 && inputs.some(i => i instanceof File)) {
+      onFilesUploaded?.(uploadedInfos);
     }
 
     // 3. Generate content
     onStepChange?.("Generating insights...");
+    parts.push({ text: SYSTEM_PROMPT });
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: {
-        parts: [
-          {
-            fileData: {
-              mimeType: mimeType,
-              fileUri: fileUri
-            }
-          },
-          {
-            text: SYSTEM_PROMPT
-          }
-        ]
+        parts: parts
       },
       config: {
         // Remove thinkingBudget if not supported by the model, or keep if it is.

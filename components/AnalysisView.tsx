@@ -6,7 +6,7 @@ import { Check, Copy, RefreshCw, AlertTriangle, FileText, ChevronRight, Share, D
 import { ExportModal } from './ExportModal';
 
 interface AnalysisViewProps {
-  fileData: FileData | null;
+  filesData: FileData[];
   analysisState: AnalysisState;
   onReset: () => void;
   onRetry: () => void;
@@ -14,7 +14,7 @@ interface AnalysisViewProps {
 }
 
 export const AnalysisView: React.FC<AnalysisViewProps> = ({ 
-  fileData, 
+  filesData, 
   analysisState, 
   onReset,
   onRetry,
@@ -94,7 +94,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           <div className="p-5 border-b border-slate-50 flex items-center justify-between bg-white">
             <h3 className="font-bold text-slate-800 flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-              {fileData.type === 'video' ? 'Source Recording' : 'Audio Recording'}
+              Source Recordings ({filesData.length})
             </h3>
             <button 
               onClick={onReset}
@@ -104,21 +104,25 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             </button>
           </div>
           
-          <div className="relative bg-slate-50 aspect-video flex items-center justify-center">
-            {fileData.type === 'video' ? (
-              <video 
-                src={fileData.previewUrl} 
-                controls 
-                className="w-full h-full object-contain" 
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-4 text-slate-400 w-full p-8">
-                <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center border-4 border-slate-100 shadow-sm">
-                  <FileText size={36} className="text-slate-300" />
-                </div>
-                <audio src={fileData.previewUrl} controls className="w-full mt-2 accent-orange-500" />
+          <div className="flex flex-col max-h-[60vh] overflow-y-auto">
+            {filesData.map((fileData, index) => (
+              <div key={index} className="relative bg-slate-50 aspect-video flex items-center justify-center border-b border-slate-100 last:border-b-0">
+                {fileData.type === 'video' ? (
+                  <video 
+                    src={fileData.previewUrl} 
+                    controls 
+                    className="w-full h-full object-contain" 
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-4 text-slate-400 w-full p-8">
+                    <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center border-4 border-slate-100 shadow-sm">
+                      <FileText size={36} className="text-slate-300" />
+                    </div>
+                    <audio src={fileData.previewUrl} controls className="w-full mt-2 accent-orange-500" />
+                  </div>
+                )}
               </div>
-            )}
+            ))}
           </div>
         </div>
 
